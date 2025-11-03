@@ -526,6 +526,26 @@ if ('serviceWorker' in navigator) {
 // PWA Install Prompt
 let deferredPrompt;
 
+// Rileva il dispositivo e browser
+function detectDevice() {
+    const ua = navigator.userAgent.toLowerCase();
+    const isIOS = /iphone|ipad|ipod/.test(ua);
+    const isAndroid = /android/.test(ua);
+    const isChrome = /chrome/.test(ua) && !/edg/.test(ua);
+    const isSafari = /safari/.test(ua) && !/chrome/.test(ua);
+    const isChromeIOS = isIOS && isChrome;
+    const isSafariIOS = isIOS && isSafari;
+    
+    return {
+        isIOS,
+        isAndroid,
+        isChrome,
+        isSafari,
+        isChromeIOS,
+        isSafariIOS
+    };
+}
+
 // Verifica se l'app è già installata
 function isAppInstalled() {
     if (window.matchMedia('(display-mode: standalone)').matches) {
@@ -542,7 +562,21 @@ function isAppInstalled() {
 
 // Verifica se il browser supporta l'installazione
 function isInstallable() {
-    // Controlla se il manifest è presente
+    const device = detectDevice();
+    
+    // Su Safari iOS, l'app è sempre installabile (tramite "Aggiungi alla schermata Home")
+    // anche se non supporta beforeinstallprompt
+    if (device.isSafariIOS || device.isIOS) {
+        // Controlla se è già installata
+        if (isAppInstalled()) {
+            console.log('App già installata su iOS');
+            return false;
+        }
+        // Su iOS, l'app è installabile anche senza manifest (usa meta tag)
+        return true;
+    }
+    
+    // Per altri browser, controlla il manifest
     const manifestLink = document.querySelector('link[rel="manifest"]');
     if (!manifestLink) {
         console.log('Manifest non trovato');
@@ -558,6 +592,21 @@ function isInstallable() {
     return true;
 }
 
+// Ottieni il messaggio di installazione personalizzato per il browser
+function getInstallMessage() {
+    const device = detectDevice();
+    
+    if (device.isChromeIOS) {
+        return 'Per installare l\'app su iOS, apri questa pagina in Safari e usa "Condividi" > "Aggiungi alla schermata Home"';
+    } else if (device.isSafariIOS) {
+        return 'Tocca il pulsante Condividi e seleziona "Aggiungi alla schermata Home"';
+    } else if (device.isAndroid && device.isChrome) {
+        return 'Installa l\'app per un\'esperienza migliore';
+    } else {
+        return 'Installa l\'app per un\'esperienza migliore';
+    }
+}
+
 // Mostra il prompt di installazione
 function showInstallPrompt() {
     const installPrompt = document.getElementById('installPrompt');
@@ -571,6 +620,12 @@ function showInstallPrompt() {
     // Non mostrare se già installata
     if (isAppInstalled()) {
         return;
+    }
+    
+    // Aggiorna il testo del prompt in base al browser
+    const installPromptText = installPrompt.querySelector('.install-prompt-text');
+    if (installPromptText) {
+        installPromptText.textContent = getInstallMessage();
     }
     
     installPrompt.classList.add('show');
@@ -591,14 +646,20 @@ window.addEventListener('beforeinstallprompt', (e) => {
 
 // Mostra il prompt anche se beforeinstallprompt non viene attivato (per alcuni browser)
 window.addEventListener('load', () => {
+    const device = detectDevice();
+    
+    // Su Safari iOS, mostra il prompt più velocemente (non supporta beforeinstallprompt)
+    const delay = device.isSafariIOS ? 2000 : 5000;
+    
     setTimeout(() => {
-        // Se dopo 5 secondi non abbiamo ancora deferredPrompt ma l'app è installabile
+        // Se dopo il delay non abbiamo ancora deferredPrompt ma l'app è installabile
         if (!deferredPrompt && isInstallable()) {
             console.log('Prompt manuale - browser potrebbe non supportare beforeinstallprompt');
+            console.log('Device:', device);
             // Mostra comunque il prompt, ma con messaggio diverso
             showInstallPrompt();
         }
-    }, 5000);
+    }, delay);
 });
 
 // Inizializza quando il DOM è pronto
@@ -618,7 +679,46 @@ document.addEventListener('DOMContentLoaded', () => {
         
         if (installButton) {
             installButton.addEventListener('click', async () => {
-                if (deferredPrompt) {
+                const device = detectDevice();
+                
+                if (device.isChromeIOS) {
+                    // Chrome iOS: mostra istruzioni per aprire in Safari
+                    const openInSafari = confirm(
+                        'Chrome iOS non supporta l\'installazione diretta di app.\n\n' +
+                        'Vuoi aprire questa pagina in Safari?\n\n' +
+                        'In Safari, tocca il pulsante Condividi e seleziona "Aggiungi alla schermata Home"'
+                    );
+                    if (openInSafari) {
+                        // Prova ad aprire in Safari
+                        const url = window.location.href;
+                        window.location.href = url.replace('https://', 'x-safari-https://').replace('http://', 'x-safari-http://');
+                        // Fallback: mostra istruzioni
+                        setTimeout(() => {
+                            alert('Copia questo link e aprilo in Safari:\n\n' + url);
+                        }, 1000);
+                    }
+                    installPrompt.classList.remove('show');
+                    localStorage.setItem('installPromptDismissed', 'true');
+                } else if (device.isSafariIOS || device.isIOS) {
+                    // Safari iOS: mostra istruzioni visuali più chiare
+                    const instructions = `
+Per installare l'app su iOS:
+
+1. Tocca il pulsante Condividi 📤
+   (icona quadrato con freccia in alto)
+
+2. Scorri verso il basso nel menu
+
+3. Tocca "Aggiungi alla schermata Home" ➕
+
+4. Tocca "Aggiungi" in alto a destra
+
+L'app apparirà sulla tua schermata Home come un'app nativa!
+                    `;
+                    alert(instructions.trim());
+                    installPrompt.classList.remove('show');
+                } else if (deferredPrompt) {
+                    // Chrome/Edge su Android o desktop
                     try {
                         deferredPrompt.prompt();
                         const { outcome } = await deferredPrompt.userChoice;
@@ -630,12 +730,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     } catch (error) {
                         console.error('Errore durante l\'installazione:', error);
                         // Fallback: mostra istruzioni manuali
-                        alert('Per installare l\'app, usa il menu del browser:\n\nChrome: Menu > Installa app\nSafari (iOS): Condividi > Aggiungi alla schermata Home');
+                        if (device.isAndroid) {
+                            alert('Per installare l\'app, tocca il menu del browser (tre puntini) e seleziona "Installa app" o "Aggiungi alla schermata Home"');
+                        } else {
+                            alert('Per installare l\'app, usa il menu del browser:\n\nChrome: Menu > Installa app');
+                        }
                     }
                     deferredPrompt = null;
                 } else {
                     // Fallback per browser che non supportano beforeinstallprompt
-                    alert('Per installare l\'app, usa il menu del browser:\n\nChrome: Menu > Installa app\nSafari (iOS): Condividi > Aggiungi alla schermata Home');
+                    if (device.isAndroid) {
+                        alert('Per installare l\'app, tocca il menu del browser (tre puntini) e seleziona "Installa app" o "Aggiungi alla schermata Home"');
+                    } else {
+                        alert('Per installare l\'app, usa il menu del browser:\n\nChrome: Menu > Installa app');
+                    }
                     installPrompt.classList.remove('show');
                 }
             });
@@ -647,10 +755,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 localStorage.setItem('installPromptDismissed', 'true');
             });
         }
+        
+        // Su Safari iOS, mostra il prompt anche subito dopo DOMContentLoaded se non è già stato mostrato
+        const device = detectDevice();
+        if (device.isSafariIOS && !localStorage.getItem('installPromptDismissed') && !isAppInstalled()) {
+            setTimeout(() => {
+                if (!installPrompt.classList.contains('show')) {
+                    showInstallPrompt();
+                }
+            }, 1500);
+        }
     }
     
     // Debug: log dello stato dell'installazione
+    const device = detectDevice();
     console.log('PWA Install Status:', {
+        device: device,
         isInstalled: isAppInstalled(),
         isInstallable: isInstallable(),
         hasDeferredPrompt: !!deferredPrompt,

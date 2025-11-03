@@ -526,16 +526,79 @@ if ('serviceWorker' in navigator) {
 // PWA Install Prompt
 let deferredPrompt;
 
+// Verifica se l'app è già installata
+function isAppInstalled() {
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+        return true;
+    }
+    if (window.navigator.standalone === true) {
+        return true;
+    }
+    if (document.referrer.includes('android-app://')) {
+        return true;
+    }
+    return false;
+}
+
+// Verifica se il browser supporta l'installazione
+function isInstallable() {
+    // Controlla se il manifest è presente
+    const manifestLink = document.querySelector('link[rel="manifest"]');
+    if (!manifestLink) {
+        console.log('Manifest non trovato');
+        return false;
+    }
+    
+    // Controlla se è già installata
+    if (isAppInstalled()) {
+        console.log('App già installata');
+        return false;
+    }
+    
+    return true;
+}
+
+// Mostra il prompt di installazione
+function showInstallPrompt() {
+    const installPrompt = document.getElementById('installPrompt');
+    if (!installPrompt) return;
+    
+    // Non mostrare se già chiuso dall'utente
+    if (localStorage.getItem('installPromptDismissed')) {
+        return;
+    }
+    
+    // Non mostrare se già installata
+    if (isAppInstalled()) {
+        return;
+    }
+    
+    installPrompt.classList.add('show');
+}
+
+// Event listener per beforeinstallprompt
 window.addEventListener('beforeinstallprompt', (e) => {
+    console.log('beforeinstallprompt evento ricevuto');
     e.preventDefault();
     deferredPrompt = e;
     
     setTimeout(() => {
-        const installPrompt = document.getElementById('installPrompt');
-        if (installPrompt && !localStorage.getItem('installPromptDismissed')) {
-            installPrompt.classList.add('show');
+        if (isInstallable()) {
+            showInstallPrompt();
         }
     }, 3000);
+});
+
+// Mostra il prompt anche se beforeinstallprompt non viene attivato (per alcuni browser)
+window.addEventListener('load', () => {
+    setTimeout(() => {
+        // Se dopo 5 secondi non abbiamo ancora deferredPrompt ma l'app è installabile
+        if (!deferredPrompt && isInstallable()) {
+            console.log('Prompt manuale - browser potrebbe non supportare beforeinstallprompt');
+            // Mostra comunque il prompt, ma con messaggio diverso
+            showInstallPrompt();
+        }
+    }, 5000);
 });
 
 // Inizializza quando il DOM è pronto
@@ -556,10 +619,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (installButton) {
             installButton.addEventListener('click', async () => {
                 if (deferredPrompt) {
-                    deferredPrompt.prompt();
-                    const { outcome } = await deferredPrompt.userChoice;
-                    console.log(`Risultato installazione: ${outcome}`);
+                    try {
+                        deferredPrompt.prompt();
+                        const { outcome } = await deferredPrompt.userChoice;
+                        console.log(`Risultato installazione: ${outcome}`);
+                        installPrompt.classList.remove('show');
+                        if (outcome === 'accepted') {
+                            localStorage.removeItem('installPromptDismissed');
+                        }
+                    } catch (error) {
+                        console.error('Errore durante l\'installazione:', error);
+                        // Fallback: mostra istruzioni manuali
+                        alert('Per installare l\'app, usa il menu del browser:\n\nChrome: Menu > Installa app\nSafari (iOS): Condividi > Aggiungi alla schermata Home');
+                    }
                     deferredPrompt = null;
+                } else {
+                    // Fallback per browser che non supportano beforeinstallprompt
+                    alert('Per installare l\'app, usa il menu del browser:\n\nChrome: Menu > Installa app\nSafari (iOS): Condividi > Aggiungi alla schermata Home');
                     installPrompt.classList.remove('show');
                 }
             });
@@ -572,5 +648,13 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
     }
+    
+    // Debug: log dello stato dell'installazione
+    console.log('PWA Install Status:', {
+        isInstalled: isAppInstalled(),
+        isInstallable: isInstallable(),
+        hasDeferredPrompt: !!deferredPrompt,
+        manifestPresent: !!document.querySelector('link[rel="manifest"]')
+    });
 });
 

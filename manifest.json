@@ -2,12 +2,12 @@
   "name": "Mobile Gesture Demo",
   "short_name": "Gesture Demo",
   "description": "Demo di un carosello controllato tramite gesture circolari su dispositivi mobili",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#000000",
   "orientation": "portrait",
-  "scope": "/",
+  "scope": "./",
   "icons": [
     {
       "src": "icon-192.png",
